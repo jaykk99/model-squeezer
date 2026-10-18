@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp /llama
 RUN cmake -S /llama -B /llama/build -DGGML_NATIVE=OFF \
     -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF \
-    && cmake --build /llama/build --target llama-quantize -j$(nproc) \
+    && cmake --build /llama/build --target llama-quantize -j2 \
     && mkdir -p /opt/bin && cp /llama/build/bin/llama-quantize /opt/bin/quantize
 
 # Runtime
