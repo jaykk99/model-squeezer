@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: model-squeezer
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: SQ_DATA
+        value: /srv/data

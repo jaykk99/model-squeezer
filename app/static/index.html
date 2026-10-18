@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model Squeezer</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #262d36;
+    --text: #e6edf3; --dim: #8b949e; --accent: #58a6ff; --good: #3fb950;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin-bottom: 18px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+  .tab { padding: 10px 18px; border: 1px solid var(--line); border-radius: 8px;
+         background: var(--panel); color: var(--text); cursor: pointer; font-size: 15px; }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #04121f; font-weight: 700; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 18px; margin-bottom: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 18px; }
+  label { display: block; font-size: 13px; color: var(--dim); margin: 10px 0 4px; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font-size: 15px; }
+  button.go { background: var(--accent); color: #04121f; border: none; border-radius: 8px;
+              padding: 12px 22px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 12px; }
+  button.go:disabled { opacity: 0.5; cursor: default; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text);
+                 border-radius: 8px; padding: 8px 14px; cursor: pointer; font-size: 14px; }
+  .levels { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .lvl { padding: 10px 16px; border: 2px solid var(--line); border-radius: 8px;
+         background: var(--bg); color: var(--text); cursor: pointer; font-size: 15px; font-weight: 600; }
+  .lvl.sel { border-color: var(--good); background: #12261a; }
+  .lvl small { display: block; font-weight: 400; color: var(--dim); font-size: 11px; }
+  .bar { height: 10px; background: var(--line); border-radius: 6px; overflow: hidden; margin: 10px 0; }
+  .bar > div { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s; }
+  .compare { display: flex; gap: 12px; align-items: flex-end; margin: 14px 0; }
+  .cb { flex: 1; text-align: center; }
+  .cb .fill { background: var(--accent); border-radius: 6px 6px 0 0; margin: 0 auto; width: 70%; }
+  .cb.after .fill { background: var(--good); }
+  .cb .n { font-size: 13px; color: var(--dim); margin-top: 6px; }
+  .cb .v { font-size: 16px; font-weight: 700; }
+  .stat { display: flex; justify-content: space-between; padding: 8px 0;
+          border-bottom: 1px solid var(--line); font-size: 15px; }
+  .stat:last-child { border-bottom: none; }
+  .stat b { color: var(--good); }
+  .modelrow { display: flex; justify-content: space-between; align-items: center;
+              padding: 10px; border: 1px solid var(--line); border-radius: 8px; margin: 6px 0; }
+  .modelrow.sel { border-color: var(--accent); }
+  .modelrow .meta { font-size: 13px; color: var(--dim); }
+  .msg { padding: 10px; border-radius: 8px; margin: 10px 0; font-size: 14px; }
+  .msg.err { background: #3d1414; border: 1px solid #7a2e2e; }
+  .msg.ok { background: #0f2c1a; border: 1px solid #2e7a4e; }
+  .msg.info { background: #10233d; border: 1px solid #2e5a7a; }
+  .hidden { display: none; }
+  table.plan { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.plan td, table.plan th { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; }
+  .fits { color: var(--good); font-weight: 700; }
+  .nofit { color: #f08080; }
+  #losschart { width: 100%; height: 160px; background: var(--bg);
+               border: 1px solid var(--line); border-radius: 8px; }
+  .hist { font-size: 14px; }
+  .hist .chain { color: var(--dim); font-size: 13px; }
+  a.dl { color: var(--accent); }
+  .srcbtns { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Model Squeezer</h1>
+  <div class="sub">Compress any model as many times as you want. Less RAM, same model.</div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="compress">Compress</button>
+    <button class="tab" data-tab="chromebook">Chromebook Mode</button>
+    <button class="tab" data-tab="train">Train</button>
+    <button class="tab" data-tab="history">History</button>
+  </div>
+
+  <!-- COMPRESS -->
+  <div id="tab-compress">
+    <div class="card">
+      <h2>1. Get a model</h2>
+      <div class="srcbtns">
+        <button class="tab srcbtn active" data-src="upload">Upload</button>
+        <button class="tab srcbtn" data-src="github">GitHub</button>
+        <button class="tab srcbtn" data-src="huggingface">Hugging Face</button>
+        <button class="tab srcbtn" data-src="url">Direct URL</button>
+      </div>
+      <div id="src-upload">
+        <label>Model file (GGUF, safetensors, bin)</label>
+        <input type="file" id="up-file" accept=".gguf,.safetensors,.bin,.pt,.pth,.onnx">
+        <button class="go" id="up-btn">Upload</button>
+      </div>
+      <div id="src-github" class="hidden">
+        <label>GitHub repo URL</label>
+        <input type="text" id="gh-url" placeholder="https://github.com/user/repo">
+        <button class="ghost" id="gh-list">List model files</button>
+        <div id="gh-files"></div>
+      </div>
+      <div id="src-huggingface" class="hidden">
+        <label>Hugging Face model URL or id</label>
+        <input type="text" id="hf-url" placeholder="https://huggingface.co/TheBloke/Mistral-7B-GGUF">
+        <button class="ghost" id="hf-list">List model files</button>
+        <div id="hf-files"></div>
+      </div>
+      <div id="src-url" class="hidden">
+        <label>Direct link to a model file</label>
+        <input type="text" id="du-url" placeholder="https://.../model-Q4_K_M.gguf">
+        <button class="go" id="du-btn">Download</button>
+      </div>
+      <div id="fetch-msg"></div>
+      <div class="bar hidden" id="fetch-bar"><div></div></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Pick a model</h2>
+      <div id="models"><div class="msg info">No models yet. Add one above.</div></div>
+    </div>
+
+    <div class="card">
+      <h2>3. Pick compression level</h2>
+      <div class="levels" id="levels"></div>
+      <div class="msg info">Tip: compress again after to chain levels, like Q8 then Q4 then Q2. Each step keeps working, just smaller.</div>
+      <button class="go" id="sq-btn" disabled>Squeeze it</button>
+      <div class="bar hidden" id="sq-bar"><div></div></div>
+      <div id="sq-msg"></div>
+      <div id="sq-result"></div>
+    </div>
+  </div>
+
+  <!-- CHROMEBOOK -->
+  <div id="tab-chromebook" class="hidden">
+    <div class="card">
+      <h2>Chromebook Mode: huge model, 4GB RAM, CPU only</h2>
+      <p style="color:var(--dim);font-size:14px">Pick a model (or type its size in billions of params). We show the honest math for every compression level and whether it fits in 4GB. No fake promises: a 70B model cannot fit in 4GB no matter what, the table proves it.</p>
+      <label>Model (uses known param count)</label>
+      <select id="cb-model"><option value="">-- choose --</option></select>
+      <label>Or size in billions of params</label>
+      <input type="number" id="cb-params" placeholder="70" min="0.1" step="0.1">
+      <button class="go" id="cb-btn">Show the math</button>
+      <div id="cb-out" style="margin-top:14px"></div>
+    </div>
+  </div>
+
+  <!-- TRAIN -->
+  <div id="tab-train" class="hidden">
+    <div class="card">
+      <h2>CPU fine-tuning (LoRA)</h2>
+      <p style="color:var(--dim);font-size:14px">Fine-tune a model on CPU with no GPU. LoRA only trains a small adapter, so it works on weak hardware. Slow but real. Needs a Hugging Face style model (safetensors or pytorch bin), not GGUF.</p>
+      <label>Base model</label>
+      <select id="tr-model"><option value="">-- choose --</option></select>
+      <label>Training data (.txt or .jsonl with a "text" field per line)</label>
+      <input type="file" id="tr-data" accept=".txt,.jsonl">
+      <label>Method</label>
+      <select id="tr-method">
+        <option value="lora">LoRA (standard)</option>
+        <option value="lora-lowmem">LoRA Low-Memory (Adafactor + checkpointing, for weak CPUs)</option>
+      </select>
+      <label>Epochs</label>
+      <input type="number" id="tr-epochs" value="1" min="1" max="20">
+      <label>Learning rate</label>
+      <input type="number" id="tr-lr" value="0.0002" step="0.0001" min="0.00001">
+      <label>Batch size</label>
+      <input type="number" id="tr-bs" value="1" min="1" max="8">
+      <label>Gradient accumulation steps</label>
+      <input type="number" id="tr-acc" value="8" min="1" max="64">
+      <button class="go" id="tr-btn">Start training</button>
+      <button class="ghost hidden" id="tr-cancel">Cancel</button>
+      <div class="bar hidden" id="tr-bar"><div></div></div>
+      <div id="tr-msg"></div>
+      <canvas id="losschart" class="hidden"></canvas>
+    </div>
+  </div>
+
+  <!-- HISTORY -->
+  <div id="tab-history" class="hidden">
+    <div class="card">
+      <h2>Compression history</h2>
+      <div id="hist"><div class="msg info">Nothing squeezed yet.</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let selModel = null, selLevel = null, levels = [];
+
+// tabs
+document.querySelectorAll('.tab[data-tab]').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab[data-tab]').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  ['compress','chromebook','train','history'].forEach(n =>
+    $('tab-'+n).classList.toggle('hidden', n !== t.dataset.tab));
+  if (t.dataset.tab === 'history') loadHistory();
+  if (t.dataset.tab === 'chromebook' || t.dataset.tab === 'train') loadModels(true);
+});
+// source buttons
+document.querySelectorAll('.srcbtn').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.srcbtn').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  ['upload','github','huggingface','url'].forEach(n =>
+    $('src-'+n).classList.toggle('hidden', n !== t.dataset.src));
+});
+
+function msg(el, text, cls) {
+  el.innerHTML = text ? '<div class="msg ' + cls + '">' + text + '</div>' : '';
+}
+async function pollJob(jid, barEl, msgEl, done) {
+  const bar = barEl ? $(barEl) : null;
+  if (bar) bar.classList.remove('hidden');
+  while (true) {
+    await new Promise(r => setTimeout(r, 1500));
+    const j = await (await fetch('/api/jobs/' + jid)).json();
+    if (bar) bar.firstElementChild.style.width = (j.progress || 0) + '%';
+    if (j.status_msg) msg($(msgEl), j.status_msg, 'info');
+    if (j.ok === true) { done(j); return; }
+    if (j.ok === false) { msg($(msgEl), 'Failed: ' + (j.error || 'unknown'), 'err'); return; }
+  }
+}
+
+// levels
+fetch('/api/levels').then(r => r.json()).then(d => {
+  levels = d.levels;
+  $('levels').innerHTML = d.levels.map(l =>
+    '<button class="lvl" data-l="' + l.name + '">' + l.name +
+    '<small>' + l.quant_type + ' ~' + l.bits + ' bits</small></button>').join('');
+  document.querySelectorAll('.lvl').forEach(b => b.onclick = () => {
+    document.querySelectorAll('.lvl').forEach(x => x.classList.remove('sel'));
+    b.classList.add('sel'); selLevel = b.dataset.l; updSq();
+  });
+});
+function updSq() { $('sq-btn').disabled = !(selModel && selLevel); }
+
+// models
+async function loadModels(fillSelects) {
+  const d = await (await fetch('/api/models')).json();
+  const ms = d.models || [];
+  $('models').innerHTML = ms.length ? ms.map(m =>
+    '<div class="modelrow' + (selModel === m.id ? ' sel' : '') + '" data-m="' + m.id + '">' +
+    '<div><b>' + m.name + '</b><div class="meta">' + m.size_mb + ' MB' +
+    (m.params_b ? ' | ' + m.params_b + 'B params' : '') + ' | ' + m.source + '</div></div>' +
+    '<button class="ghost">Use</button></div>').join('')
+    : '<div class="msg info">No models yet. Add one above.</div>';
+  document.querySelectorAll('.modelrow').forEach(r => r.onclick = () => {
+    selModel = r.dataset.m; updSq(); loadModels(fillSelects);
+  });
+  if (fillSelects) {
+    const opts = '<option value="">-- choose --</option>' + ms.map(m =>
+      '<option value="' + m.id + '">' + m.name + ' (' + m.size_mb + ' MB)</option>').join('');
+    $('cb-model').innerHTML = opts; $('tr-model').innerHTML = opts;
+  }
+}
+loadModels(false);
+
+// upload
+$('up-btn').onclick = async () => {
+  const f = $('up-file').files[0];
+  if (!f) { msg($('fetch-msg'), 'Pick a file first.', 'err'); return; }
+  const fd = new FormData(); fd.append('file', f);
+  const d = await (await fetch('/api/upload', {method: 'POST', body: fd})).json();
+  pollJob(d.job_id, 'fetch-bar', 'fetch-msg', j => {
+    msg($('fetch-msg'), 'Model ready: ' + j.result.model.name, 'ok');
+    loadModels(false);
+  });
+};
+// github list
+$('gh-list').onclick = async () => {
+  const url = $('gh-url').value.trim();
+  if (!url) return;
+  const d = await (await fetch('/api/fetch/list?kind=github&url=' + encodeURIComponent(url))).json();
+  if (d.files) $('gh-files').innerHTML = d.files.map((f, i) =>
+    '<div class="modelrow"><div><b>' + f.path + '</b><div class="meta">' +
+    (f.size / 1048576).toFixed(1) + ' MB</div></div>' +
+    '<button class="ghost" data-raw="' + f.raw_url + '" data-n="' + f.path.split('/').pop() + '">Download</button></div>').join('')
+    || '<div class="msg info">No model files found.</div>';
+  else msg($('fetch-msg'), d.detail || 'error', 'err');
+  document.querySelectorAll('#gh-files .ghost').forEach(b => b.onclick = () => startFetch('github', url, b.dataset.raw, ''));
+};
+// hf list
+$('hf-list').onclick = async () => {
+  const url = $('hf-url').value.trim();
+  if (!url) return;
+  const d = await (await fetch('/api/fetch/list?kind=huggingface&url=' + encodeURIComponent(url))).json();
+  if (d.files) {
+    const m = url.match(/huggingface\.co\/([^\/]+\/[^\/]+)/);
+    const rid = m ? m[1] : url.trim();
+    $('hf-files').innerHTML = d.files.map(f =>
+      '<div class="modelrow"><div><b>' + f.path + '</b></div>' +
+      '<button class="ghost" data-f="' + f.path + '" data-r="' + rid + '">Download</button></div>').join('')
+      || '<div class="msg info">No model files found.</div>';
+    document.querySelectorAll('#hf-files .ghost').forEach(b => b.onclick = () =>
+      startFetch('huggingface', url, b.dataset.f, b.dataset.r));
+  } else msg($('fetch-msg'), d.detail || 'error', 'err');
+};
+// direct url
+$('du-btn').onclick = () => {
+  const url = $('du-url').value.trim();
+  if (!url) return;
+  startFetch('url', url, '', '');
+};
+async function startFetch(kind, url, filename, repo_id) {
+  const d = await (await fetch('/api/fetch', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({kind, url, filename, repo_id})})).json();
+  pollJob(d.job_id, 'fetch-bar', 'fetch-msg', j => {
+    msg($('fetch-msg'), 'Model ready: ' + j.result.model.name, 'ok');
+    loadModels(false);
+  });
+}
+
+// squeeze
+$('sq-btn').onclick = async () => {
+  $('sq-result').innerHTML = '';
+  const d = await (await fetch('/api/compress', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({model_id: selModel, level: selLevel})})).json();
+  pollJob(d.job_id, 'sq-bar', 'sq-msg', j => {
+    const r = j.result;
+    msg($('sq-msg'), 'Done: ' + r.before_mb + ' MB became ' + r.after_mb + ' MB.', 'ok');
+    const maxv = Math.max(r.before_mb, r.after_mb);
+    $('sq-result').innerHTML =
+      '<div class="compare">' +
+      '<div class="cb"><div class="fill" style="height:' + (r.before_mb / maxv * 120) + 'px"></div><div class="v">' + r.before_mb + ' MB</div><div class="n">Before</div></div>' +
+      '<div class="cb after"><div class="fill" style="height:' + (r.after_mb / maxv * 120) + 'px"></div><div class="v">' + r.after_mb + ' MB</div><div class="n">After (' + r.level + ')</div></div>' +
+      '</div>' +
+      '<div class="stat"><span>Saved</span><b>' + r.saved_mb + ' MB (' + r.saved_pct + '%)</b></div>' +
+      '<div class="stat"><span>Est. RAM before</span><span>' + r.before_mb + ' MB</span></div>' +
+      '<div class="stat"><span>Est. RAM after</span><b>' + r.after_mb + ' MB</b></div>' +
+      '<p><a class="dl" href="/api/download/' + r.file_id + '">Download ' + r.name + '</a>' +
+      ' &nbsp; <button class="ghost" id="again">Compress again</button></p>';
+    $('again').onclick = () => { selModel = r.file_id; updSq(); loadModels(false);
+      msg($('sq-msg'), 'Now squeezing ' + r.name + '. Pick the next level.', 'info'); };
+    loadModels(false);
+  });
+};
+
+// chromebook
+$('cb-btn').onclick = async () => {
+  let q = '';
+  const mid = $('cb-model').value, pb = $('cb-params').value;
+  if (mid) q = 'model_id=' + mid; else if (pb) q = 'params_b=' + pb;
+  else { msg($('cb-out'), 'Pick a model or type a size.', 'err'); return; }
+  const d = await (await fetch('/api/chromebook/plan?' + q)).json();
+  if (d.detail) { msg($('cb-out'), d.detail, 'err'); return; }
+  $('cb-out').innerHTML =
+    '<table class="plan"><tr><th>Level</th><th>Type</th><th>Est. size</th><th>Fits 4GB?</th></tr>' +
+    d.plan.map(r => '<tr><td><b>' + r.level + '</b></td><td>' + r.quant_type + '</td><td>' +
+      (r.est_mb >= 1024 ? (r.est_mb / 1024).toFixed(1) + ' GB' : r.est_mb + ' MB') + '</td><td class="' +
+      (r.fits_4gb ? 'fits">YES' : 'nofit">NO') + '</td></tr>').join('') + '</table>' +
+    '<div class="msg ' + (d.verdict.includes('cannot') ? 'err' : 'ok') + '">' + d.verdict + '</div>' +
+    '<div class="msg info">' + d.mmap_note + '</div>';
+};
+
+// train
+let trainJid = null;
+$('tr-btn').onclick = async () => {
+  const mid = $('tr-model').value, df = $('tr-data').files[0];
+  if (!mid || !df) { msg($('tr-msg'), 'Pick a model and a data file.', 'err'); return; }
+  const fd = new FormData();
+  fd.append('model_id', mid); fd.append('method', $('tr-method').value);
+  fd.append('epochs', $('tr-epochs').value); fd.append('lr', $('tr-lr').value);
+  fd.append('batch_size', $('tr-bs').value); fd.append('grad_accum', $('tr-acc').value);
+  fd.append('data', df);
+  const d = await (await fetch('/api/train', {method: 'POST', body: fd})).json();
+  trainJid = d.job_id;
+  $('tr-cancel').classList.remove('hidden'); $('losschart').classList.remove('hidden');
+  pollTrain(trainJid);
+};
+$('tr-cancel').onclick = async () => {
+  if (trainJid) await fetch('/api/train/cancel/' + trainJid, {method: 'POST'});
+};
+async function pollTrain(jid) {
+  $('tr-bar').classList.remove('hidden');
+  while (true) {
+    await new Promise(r => setTimeout(r, 3000));
+    const j = await (await fetch('/api/jobs/' + jid)).json();
+    $('tr-bar').firstElementChild.style.width = (j.progress || 0) + '%';
+    let extra = '';
+    if (j.eta_seconds) extra = ' ETA about ' + Math.round(j.eta_seconds / 60) + ' min.';
+    msg($('tr-msg'), (j.status_msg || '') + extra, 'info');
+    if (j.loss_curve) drawLoss(j.loss_curve);
+    if (j.ok === true) {
+      msg($('tr-msg'), j.status_msg + ' <a class="dl" href="/api/download/' +
+        j.result.file_id + '">Download adapter</a>', 'ok');
+      $('tr-cancel').classList.add('hidden'); return;
+    }
+    if (j.ok === false) {
+      msg($('tr-msg'), 'Failed: ' + (j.error || 'unknown'), 'err');
+      $('tr-cancel').classList.add('hidden'); return;
+    }
+  }
+}
+function drawLoss(curve) {
+  const c = $('losschart'), ctx = c.getContext('2d');
+  c.width = c.offsetWidth; c.height = 160;
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (curve.length < 2) return;
+  const mx = Math.max(...curve), mn = Math.min(...curve), rg = (mx - mn) || 1;
+  ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2; ctx.beginPath();
+  curve.forEach((v, i) => {
+    const x = i / (curve.length - 1) * (c.width - 10) + 5;
+    const y = c.height - 10 - (v - mn) / rg * (c.height - 20);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+}
+
+// history
+async function loadHistory() {
+  const d = await (await fetch('/api/history')).json();
+  $('hist').innerHTML = d.history.length ? d.history.map(h =>
+    '<div class="stat hist"><span><b>' + h.input + '</b> <span class="chain">squeezed to</span> <b>' +
+    h.output + '</b> <span class="chain">(' + h.level + ')</span><br><span class="chain">' +
+    h.at.replace('T', ' ').slice(0, 19) + '</span></span>' +
+    '<span><b>' + h.before_mb + ' MB</b> became <b>' + h.after_mb + ' MB</b> ' +
+    '(saved ' + h.saved_pct + '%) <a class="dl" href="/api/download/' + h.file_id + '">download</a></span></div>'
+  ).join('') : '<div class="msg info">Nothing squeezed yet.</div>';
+}
+</script>
+</body>
+</html>
