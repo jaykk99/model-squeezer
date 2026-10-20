@@ -16,11 +16,20 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from quant import (QUANT_LEVELS, BITS_PER_PARAM, estimate_size_mb, fmt_mb,
-                   gguf_param_count, run_quantize, chromebook_plan,
-                   CHROMEBOOK_RAM_MB)
-from sources import (download_url, github_list_models, huggingface_list_models,
-                     huggingface_download, safe_filename, parse_github_repo)
+try:
+    # Package mode (uvicorn app.main:app, the Docker/Render entrypoint)
+    from app.quant import (QUANT_LEVELS, BITS_PER_PARAM, estimate_size_mb, fmt_mb,
+                           gguf_param_count, run_quantize, chromebook_plan,
+                           CHROMEBOOK_RAM_MB, find_quantize_bin)
+    from app.sources import (download_url, github_list_models, huggingface_list_models,
+                             huggingface_download, safe_filename, parse_github_repo)
+except ImportError:
+    # Script mode (uvicorn main:app from inside app/)
+    from quant import (QUANT_LEVELS, BITS_PER_PARAM, estimate_size_mb, fmt_mb,
+                       gguf_param_count, run_quantize, chromebook_plan,
+                       CHROMEBOOK_RAM_MB, find_quantize_bin)
+    from sources import (download_url, github_list_models, huggingface_list_models,
+                         huggingface_download, safe_filename, parse_github_repo)
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("SQ_DATA", os.path.join(BASE, "..", "data"))
@@ -357,7 +366,10 @@ async def api_train(model_id: str = Form(...),
 
     def _run():
         try:
-            from train import run_lora_training
+            try:
+                from app.train import run_lora_training  # package mode
+            except ImportError:
+                from train import run_lora_training  # script mode
             job = jobs[jid]
             run_lora_training(job, mp, data_path, out_dir,
                               method=method, epochs=epochs, lr=lr,
@@ -416,7 +428,6 @@ def api_download(fid: str):
 
 @app.get("/api/health")
 def api_health():
-    from quant import find_quantize_bin
     return {"ok": True, "quantize": bool(find_quantize_bin()),
             "time": int(time.time())}
 
