@@ -228,6 +228,90 @@ def test_download_404(c):
     assert client.get("/api/download/nope").status_code == 404
 
 
+def test_preview_bad_level(c):
+    client, _ = c
+    r = client.get("/api/compress/preview?model_id=x&level=Q99")
+    assert r.status_code == 400
+
+
+def test_preview_bad_model(c):
+    client, _ = c
+    r = client.get("/api/compress/preview?model_id=nope&level=Q4")
+    assert r.status_code == 404
+
+
+def test_preview_no_params(c):
+    client, app_main = c
+    model = _upload(client, "p.gguf", b"GGUF")
+    r = client.get("/api/compress/preview?model_id=%s&level=q4" % model["id"])
+    assert r.status_code == 200
+    body = r.json()
+    assert body["level"] == "Q4"
+    assert body["est_after_mb"] is None
+    assert body["note"] is not None
+
+
+def test_preview_with_params(c):
+    client, app_main = c
+    model = _upload(client, "p2.gguf", b"GGUF")
+    reg = app_main.registry()
+    reg[model["id"]]["params"] = 7_000_000_000
+    reg[model["id"]]["params_b"] = 7.0
+    reg[model["id"]]["size_mb"] = 14000.0  # fake upload is bytes; pretend F16 7B
+    app_main.save_registry(reg)
+    r = client.get("/api/compress/preview?model_id=%s&level=Q4" % model["id"])
+    assert r.status_code == 200
+    body = r.json()
+    assert 3900 < body["est_after_mb"] < 4300
+    assert body["est_saved_pct"] is not None
+
+
+def test_chain(c):
+    client, app_main = c
+    reg = app_main.registry()
+    reg["o1"] = {"id": "o1", "name": "orig.gguf", "size_mb": 100,
+                 "source": "upload", "created": "2026-01-01T00:00:00"}
+    reg["o2"] = {"id": "o2", "name": "orig-Q8.gguf", "size_mb": 80,
+                 "source": "compressed", "level": "Q8", "quant_type": "Q8_0",
+                 "from": "o1", "origin_id": "o1",
+                 "created": "2026-01-02T00:00:00"}
+    reg["o3"] = {"id": "o3", "name": "orig-Q4.gguf", "size_mb": 50,
+                 "source": "compressed", "level": "Q4", "quant_type": "Q4_K_M",
+                 "from": "o2", "origin_id": "o1",
+                 "created": "2026-01-03T00:00:00"}
+    app_main.save_registry(reg)
+    r = client.get("/api/models/o3/chain")
+    assert r.status_code == 200
+    ids = [s["id"] for s in r.json()["chain"]]
+    assert ids == ["o1", "o2", "o3"]
+    r = client.get("/api/models/o1/chain")
+    assert [s["id"] for s in r.json()["chain"]] == ["o1"]
+    assert client.get("/api/models/nope/chain").status_code == 404
+
+
+def test_rename(c):
+    client, app_main = c
+    model = _upload(client, "r.gguf", b"GGUF")
+    r = client.patch("/api/models/%s" % model["id"], json={"name": "renamed.gguf"})
+    assert r.status_code == 200
+    assert r.json()["name"] == "renamed.gguf"
+    assert app_main.registry()[model["id"]]["name"] == "renamed.gguf"
+    r = client.patch("/api/models/%s" % model["id"], json={"name": "  "})
+    assert r.status_code == 422
+    assert client.patch("/api/models/nope", json={"name": "x"}).status_code == 404
+
+
+def test_history_export_csv(c):
+    client, _ = c
+    r = client.get("/api/history/export?fmt=csv")
+    assert r.status_code == 200
+    assert "text/csv" in r.headers["content-type"]
+    assert r.text.splitlines()[0].startswith("at,input,output")
+    r = client.get("/api/history/export")
+    assert r.status_code == 200
+    assert "history" in r.json()
+
+
 def test_index_serves_ui(c):
     client, _ = c
     r = client.get("/")

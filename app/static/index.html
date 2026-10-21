@@ -128,6 +128,7 @@
       <h2>3. Pick compression level</h2>
       <div class="levels" id="levels"></div>
       <div class="msg info">Tip: compress again after to chain levels, like Q8 then Q4 then Q2. Each step keeps working, just smaller.</div>
+      <div id="sq-preview" class="hint" style="margin-top:8px"></div>
       <button class="go" id="sq-btn" disabled>Squeeze it</button>
       <div class="bar hidden" id="sq-bar"><div></div></div>
       <div id="sq-msg"></div>
@@ -183,7 +184,9 @@
   <div id="tab-history" class="hidden">
     <div class="card">
       <h2>Compression history</h2>
-      <div style="margin-bottom:10px"><button class="ghost" id="hist-clear">Clear history</button></div>
+      <div style="margin-bottom:10px"><button class="ghost" id="hist-clear">Clear history</button>
+        &nbsp;<a class="dl" href="/api/history/export?fmt=csv">export CSV</a>
+        &nbsp;<a class="dl" href="/api/history/export">export JSON</a></div>
       <div id="hist"><div class="msg info">Nothing squeezed yet.</div></div>
     </div>
   </div>
@@ -237,7 +240,24 @@ fetch('/api/levels').then(r => r.json()).then(d => {
     b.classList.add('sel'); selLevel = b.dataset.l; updSq();
   });
 });
-function updSq() { $('sq-btn').disabled = !(selModel && selLevel); }
+function updSq() { $('sq-btn').disabled = !(selModel && selLevel); updPreview(); }
+async function updPreview() {
+  const box = $('sq-preview');
+  if (!selModel || !selLevel) { box.textContent = ''; return; }
+  box.textContent = 'Predicting…';
+  try {
+    const d = await (await fetch('/api/compress/preview?model_id=' + selModel +
+      '&level=' + encodeURIComponent(selLevel))).json();
+    if (d.detail || !d.before_mb) { box.textContent = d.note || ''; return; }
+    if (d.est_after_mb) {
+      box.textContent = 'Predicted: ' + d.before_mb + ' MB → ~' + d.est_after_mb +
+        ' MB (' + d.est_saved_pct + '% saved at ' + d.level + ').' +
+        (d.quantize_available ? '' : ' Quantize binary missing: this will fail.');
+    } else {
+      box.textContent = d.note || '';
+    }
+  } catch { box.textContent = ''; }
+}
 
 // models
 async function loadModels(fillSelects) {
@@ -249,6 +269,7 @@ async function loadModels(fillSelects) {
     (m.params_b ? ' | ' + m.params_b + 'B params' : '') + ' | ' + m.source + '</div></div>' +
     '<div><button class="ghost" data-act="use">Use</button> ' +
     '<button class="ghost" data-act="est">Estimates</button> ' +
+    '<button class="ghost" data-act="ren">Rename</button> ' +
     '<button class="ghost" data-act="del">Delete</button></div></div>').join('')
     : '<div class="msg info">No models yet. Add one above.</div>';
   document.querySelectorAll('.modelrow').forEach(r => {
@@ -256,6 +277,7 @@ async function loadModels(fillSelects) {
       const btn = e.target.closest ? e.target.closest('button') : null;
       const mid = r.dataset.m;
       if (btn && btn.dataset.act === 'del') { e.stopPropagation(); delModel(mid, fillSelects); return; }
+      if (btn && btn.dataset.act === 'ren') { e.stopPropagation(); renameModel(mid, fillSelects); return; }
       if (btn && btn.dataset.act === 'est') { e.stopPropagation(); showEstimates(mid); return; }
       selModel = mid; updSq(); loadModels(fillSelects);
     };
@@ -290,20 +312,43 @@ async function delModel(mid, fillSelects) {
   }
 }
 
+// rename a model (display name only)
+async function renameModel(mid, fillSelects) {
+  const name = prompt('New name for this model:');
+  if (!name || !name.trim()) return;
+  const r = await fetch('/api/models/' + mid, {method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: name.trim()})});
+  if (r.ok) loadModels(fillSelects);
+  else alert('Rename failed.');
+}
+
 // per-level size estimates for one model
 async function showEstimates(mid) {
   const d = await (await fetch('/api/models/' + mid + '/estimates')).json();
   if (d.detail) { $('est-out').innerHTML = '<div class="msg err">' + d.detail + '</div>'; return; }
+  let html = '';
   if (!d.estimates.length) {
-    $('est-out').innerHTML = '<div class="msg info">' + d.note + '</div>';
-    return;
+    html = '<div class="msg info">' + d.note + '</div>';
+  } else {
+    html =
+      '<h3 style="margin:14px 0 6px">Size at each level: ' + d.name + '</h3>' +
+      '<table class="plan"><tr><th>Level</th><th>Type</th><th>Est. size</th><th>Saves vs F16</th></tr>' +
+      d.estimates.map(e => '<tr><td><b>' + e.level + '</b></td><td>' + e.quant_type + '</td><td>' +
+        (e.est_mb >= 1024 ? (e.est_mb / 1024).toFixed(1) + ' GB' : e.est_mb + ' MB') +
+        '</td><td>' + e.saved_pct_vs_f16 + '%</td></tr>').join('') + '</table>';
   }
-  $('est-out').innerHTML =
-    '<h3 style="margin:14px 0 6px">Size at each level: ' + d.name + '</h3>' +
-    '<table class="plan"><tr><th>Level</th><th>Type</th><th>Est. size</th><th>Saves vs F16</th></tr>' +
-    d.estimates.map(e => '<tr><td><b>' + e.level + '</b></td><td>' + e.quant_type + '</td><td>' +
-      (e.est_mb >= 1024 ? (e.est_mb / 1024).toFixed(1) + ' GB' : e.est_mb + ' MB') +
-      '</td><td>' + e.saved_pct_vs_f16 + '%</td></tr>').join('') + '</table>';
+  try {
+    const c = await (await fetch('/api/models/' + mid + '/chain')).json();
+    if (c.chain && c.chain.length > 1) {
+      html += '<h3 style="margin:14px 0 6px">Squeeze chain</h3><div class="dim">' +
+        c.chain.map((s, i) =>
+          (i ? ' → ' : '') + '<b>' + s.name + '</b>' +
+          (s.level ? ' (' + s.level + ')' : '') +
+          ' ' + s.size_mb + ' MB').join('') + '</div>';
+    }
+  } catch { /* chain is a bonus; estimates already shown */ }
+  $('est-out').innerHTML = html;
 }
 
 // upload

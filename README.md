@@ -43,6 +43,10 @@ disk, so files disappear on redeploy (Render free tier).
 - `GET /api/models/{id}/estimates` — honest per-level size estimates for a model with known params
 - `DELETE /api/models/{id}` — delete a model and its file; refuses (409) when other entries were derived from it, so chained compressions never lose their source
 - `DELETE /api/history` — clear compression history
+- `GET /api/compress/preview?model_id=&level=` — honest before/after prediction for one squeeze (needs known params)
+- `GET /api/models/{id}/chain` — the compress-again chain this model belongs to, oldest first
+- `PATCH /api/models/{id}` `{"name": "…"}` — rename a model (display name only)
+- `GET /api/history/export?fmt=csv` — download history as CSV (default JSON)
 - Compression accepts the level in any case (`q4`, `Q4`) or the raw llama.cpp type (`Q4_K_M`)
 - `/api/train` validates its inputs server-side (epochs 1-20, lr (0,1], batch 1-8, grad_accum 1-64, seq len 16-4096, training data non-empty and under 200 MB)
 - `download_url` only allows http(s) URLs — `file://`, `ftp://`, etc. are rejected so a crafted URL can never make the server touch local files

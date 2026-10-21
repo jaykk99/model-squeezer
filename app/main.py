@@ -376,6 +376,110 @@ def api_model_estimates(mid: str):
     }
 
 
+@app.get("/api/models/{mid}/chain")
+def api_model_chain(mid: str):
+    """The compress-again chain this model belongs to, oldest first.
+
+    Walks `from` links (each squeeze records the model it was squeezed
+    from), so a Q8 -> Q4 -> Q2 chain shows as three steps.
+    """
+    reg = registry()
+    if mid not in reg:
+        raise HTTPException(404, "model not found")
+    chain = []
+    seen = set()
+    cur = mid
+    while cur and cur not in seen:
+        seen.add(cur)
+        m = reg.get(cur)
+        if not m:
+            break
+        chain.append({
+            "id": m["id"], "name": m["name"], "size_mb": m.get("size_mb"),
+            "source": m.get("source"), "level": m.get("level"),
+            "quant_type": m.get("quant_type"),
+            "saved_pct": None,
+        })
+        nxt = m.get("from")
+        if not nxt:
+            oid = m.get("origin_id")
+            nxt = oid if oid and oid != cur else None
+        cur = nxt
+    chain.reverse()
+    return {"chain": chain}
+
+
+@app.patch("/api/models/{mid}")
+def api_model_rename(mid: str, body: dict):
+    """Rename a model (only the display name; the file is untouched)."""
+    reg = registry()
+    m = reg.get(mid)
+    if not m:
+        raise HTTPException(404, "model not found")
+    name = (body or {}).get("name", "")
+    if not isinstance(name, str) or not name.strip():
+        raise HTTPException(422, "name must be a non-empty string")
+    m["name"] = name.strip()[:120]
+    save_registry(reg)
+    return {"ok": True, "id": mid, "name": m["name"]}
+
+
+@app.get("/api/compress/preview")
+def api_compress_preview(model_id: str, level: str):
+    """Honest before/after prediction for one squeeze.
+
+    The after-size is estimated from the model's param count, so it only
+    works when the param count is known (GGUF with readable metadata).
+    """
+    level = normalize_level(level)
+    if not level:
+        raise HTTPException(400, "unknown level")
+    reg = registry()
+    m = reg.get(model_id)
+    if not m:
+        raise HTTPException(404, "model not found")
+    qtype = QUANT_LEVELS[level]
+    params = m.get("params")
+    before_mb = m.get("size_mb")
+    est_after = estimate_size_mb(params, qtype) if params else None
+    saved_pct = None
+    if before_mb and est_after:
+        saved_pct = round((before_mb - est_after) / before_mb * 100, 1)
+    return {
+        "model_id": model_id, "name": m["name"], "level": level,
+        "quant_type": qtype, "before_mb": before_mb,
+        "est_after_mb": round(est_after, 1) if est_after else None,
+        "est_saved_pct": saved_pct,
+        "quantize_available": bool(find_quantize_bin()),
+        "note": (None if params else
+                 "Param count unknown (not a GGUF with readable metadata); "
+                 "prediction needs it."),
+    }
+
+
+@app.get("/api/history/export")
+def api_history_export(fmt: str = "json"):
+    """Download the compression history as JSON or CSV."""
+    h = history()
+    if fmt == "csv":
+        import csv
+        import io
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["at", "input", "output", "level", "quant_type",
+                    "before_mb", "after_mb", "saved_mb", "saved_pct"])
+        for e in h:
+            w.writerow([e.get("at"), e.get("input"), e.get("output"),
+                        e.get("level"), e.get("quant_type"),
+                        e.get("before_mb"), e.get("after_mb"),
+                        e.get("saved_mb"), e.get("saved_pct")])
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(buf.getvalue(), media_type="text/csv",
+                                 headers={"Content-Disposition":
+                                          "attachment; filename=squeezer-history.csv"})
+    return {"history": h}
+
+
 @app.delete("/api/models/{mid}")
 def api_model_delete(mid: str):
     """Delete a model and its file. Refuses when other registry entries
