@@ -83,6 +83,16 @@ def test_estimates_404(c):
     assert client.get("/api/models/nope/estimates").status_code == 404
 
 
+def test_model_get(c):
+    client, app_main = c
+    model = _upload(client, "g.gguf", b"GGUF")
+    r = client.get("/api/models/%s" % model["id"])
+    assert r.status_code == 200
+    assert r.json()["id"] == model["id"]
+    assert r.json()["name"] == model["name"]
+    assert client.get("/api/models/nope").status_code == 404
+
+
 def test_delete_model_404(c):
     client, _ = c
     assert client.delete("/api/models/nope").status_code == 404

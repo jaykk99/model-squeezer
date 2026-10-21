@@ -39,6 +39,7 @@ disk, so files disappear on redeploy (Render free tier).
 ## API extras
 
 - `GET /api/stats` — model count, disk used, history count, quantize availability, active jobs
+- `GET /api/models/{id}` — one model
 - `GET /api/jobs?limit=20` — recent jobs, newest first (log tails stripped; fetch one job for full detail)
 - `GET /api/models/{id}/estimates` — honest per-level size estimates for a model with known params
 - `DELETE /api/models/{id}` — delete a model and its file; refuses (409) when other entries were derived from it, so chained compressions never lose their source

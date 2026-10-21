@@ -355,6 +355,15 @@ def api_jobs(limit: int = 20):
     return {"jobs": out}
 
 
+@app.get("/api/models/{mid}")
+def api_model_get(mid: str):
+    reg = registry()
+    m = reg.get(mid)
+    if not m:
+        raise HTTPException(404, "model not found")
+    return m
+
+
 @app.get("/api/models/{mid}/estimates")
 def api_model_estimates(mid: str):
     """Per-level size estimates for one model (needs known param count)."""
