@@ -322,6 +322,15 @@ def test_history_export_csv(c):
     assert "history" in r.json()
 
 
+def test_history_limit(c):
+    client, _ = c
+    r = client.get("/api/history?limit=1")
+    assert r.status_code == 200
+    assert len(r.json()["history"]) <= 1
+    r = client.get("/api/history")
+    assert r.status_code == 200
+
+
 def test_index_serves_ui(c):
     client, _ = c
     r = client.get("/")

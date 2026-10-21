@@ -312,8 +312,9 @@ def api_compress(req: CompressReq):
 
 
 @app.get("/api/history")
-def api_history():
-    return {"history": history()}
+def api_history(limit: int = 200):
+    h = history()
+    return {"history": h[:max(1, min(limit, 200))]}
 
 
 @app.get("/api/levels")
