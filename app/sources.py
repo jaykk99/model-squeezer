@@ -34,7 +34,15 @@ def _progress_reader(resp, total, dest_path, on_progress):
 
 
 def download_url(url, dest_path, on_progress=None):
-    """Stream-download any direct URL to disk."""
+    """Stream-download any direct URL to disk.
+
+    Only http(s) URLs are allowed: anything else (file://, ftp://, ...)
+    raises ValueError so a crafted URL can never make the server read or
+    write local files.
+    """
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ValueError("Only http(s) URLs are allowed, got: %s" % (scheme or "(none)"))
     req = urllib.request.Request(url, headers={"User-Agent": "model-squeezer/1.0"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         total = resp.headers.get("Content-Length")

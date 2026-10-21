@@ -20,6 +20,49 @@ QUANT_LEVELS = {
     "Q1": "IQ1_M",   # extreme 1-bit-ish, Chromebook mode
 }
 
+# llama.cpp quant type -> Jay-facing level name (accept the raw type too)
+QUANT_TYPE_TO_LEVEL = {v: k for k, v in QUANT_LEVELS.items()}
+
+
+def normalize_level(level):
+    """Normalize a user-supplied level to the canonical Q8..Q1 name.
+
+    Accepts the canonical name in any case ("q4", "Q4") and the raw
+    llama.cpp quant type in any case ("Q4_K_M", "q4_k_m"). Returns the
+    canonical name, or None when the level is unknown.
+    """
+    if not isinstance(level, str):
+        return None
+    s = level.strip().upper()
+    if s in QUANT_LEVELS:
+        return s
+    return QUANT_TYPE_TO_LEVEL.get(s)
+
+
+def size_estimates_mb(params):
+    """Per-level size estimates for a param count, highest quality first.
+
+    Returns a list of dicts: level, quant_type, bits, est_mb, and the
+    percent each level saves versus the F16 baseline.
+    """
+    if not params or params <= 0:
+        return []
+    base = estimate_size_mb(params, "F16")
+    out = []
+    for level, qtype in QUANT_LEVELS.items():
+        mb = estimate_size_mb(params, qtype)
+        if mb is None:
+            continue
+        saved_pct = round((base - mb) / base * 100, 1) if base else 0
+        out.append({
+            "level": level,
+            "quant_type": qtype,
+            "bits": BITS_PER_PARAM[qtype],
+            "est_mb": round(mb, 1),
+            "saved_pct_vs_f16": saved_pct,
+        })
+    return out
+
 # Approx bits per parameter for each quant type (weights only).
 # Used for honest size/RAM estimates before running the real quantize.
 BITS_PER_PARAM = {

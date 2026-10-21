@@ -73,6 +73,7 @@
 <div class="wrap">
   <h1>Model Squeezer</h1>
   <div class="sub">Compress any model as many times as you want. Less RAM, same model.</div>
+  <div class="sub" id="statsline" style="margin-top:-14px"></div>
 
   <div class="tabs">
     <button class="tab active" data-tab="compress">Compress</button>
@@ -120,6 +121,7 @@
     <div class="card">
       <h2>2. Pick a model</h2>
       <div id="models"><div class="msg info">No models yet. Add one above.</div></div>
+      <div id="est-out"></div>
     </div>
 
     <div class="card">
@@ -181,6 +183,7 @@
   <div id="tab-history" class="hidden">
     <div class="card">
       <h2>Compression history</h2>
+      <div style="margin-bottom:10px"><button class="ghost" id="hist-clear">Clear history</button></div>
       <div id="hist"><div class="msg info">Nothing squeezed yet.</div></div>
     </div>
   </div>
@@ -244,10 +247,18 @@ async function loadModels(fillSelects) {
     '<div class="modelrow' + (selModel === m.id ? ' sel' : '') + '" data-m="' + m.id + '">' +
     '<div><b>' + m.name + '</b><div class="meta">' + m.size_mb + ' MB' +
     (m.params_b ? ' | ' + m.params_b + 'B params' : '') + ' | ' + m.source + '</div></div>' +
-    '<button class="ghost">Use</button></div>').join('')
+    '<div><button class="ghost" data-act="use">Use</button> ' +
+    '<button class="ghost" data-act="est">Estimates</button> ' +
+    '<button class="ghost" data-act="del">Delete</button></div></div>').join('')
     : '<div class="msg info">No models yet. Add one above.</div>';
-  document.querySelectorAll('.modelrow').forEach(r => r.onclick = () => {
-    selModel = r.dataset.m; updSq(); loadModels(fillSelects);
+  document.querySelectorAll('.modelrow').forEach(r => {
+    r.onclick = (e) => {
+      const btn = e.target.closest ? e.target.closest('button') : null;
+      const mid = r.dataset.m;
+      if (btn && btn.dataset.act === 'del') { e.stopPropagation(); delModel(mid, fillSelects); return; }
+      if (btn && btn.dataset.act === 'est') { e.stopPropagation(); showEstimates(mid); return; }
+      selModel = mid; updSq(); loadModels(fillSelects);
+    };
   });
   if (fillSelects) {
     const opts = '<option value="">-- choose --</option>' + ms.map(m =>
@@ -256,6 +267,44 @@ async function loadModels(fillSelects) {
   }
 }
 loadModels(false);
+
+// dashboard stats line
+fetch('/api/stats').then(r => r.json()).then(s => {
+  $('statsline').textContent = s.models + ' model(s), ' + s.total_size_mb + ' MB on disk, ' +
+    s.history_entries + ' squeeze(s) in history' +
+    (s.quantize_available ? '' : ' (quantize binary missing: compression is disabled)') +
+    (s.active_jobs ? ' (' + s.active_jobs + ' job(s) running)' : '');
+}).catch(() => {});
+
+// delete a model (server refuses when other entries derive from it)
+async function delModel(mid, fillSelects) {
+  if (!confirm('Delete this model and its file?')) return;
+  const r = await fetch('/api/models/' + mid, {method: 'DELETE'});
+  const d = await r.json();
+  if (r.ok && d.ok) {
+    if (selModel === mid) { selModel = null; updSq(); }
+    $('est-out').innerHTML = '';
+    loadModels(fillSelects);
+  } else {
+    alert(d.detail || 'Delete failed.');
+  }
+}
+
+// per-level size estimates for one model
+async function showEstimates(mid) {
+  const d = await (await fetch('/api/models/' + mid + '/estimates')).json();
+  if (d.detail) { $('est-out').innerHTML = '<div class="msg err">' + d.detail + '</div>'; return; }
+  if (!d.estimates.length) {
+    $('est-out').innerHTML = '<div class="msg info">' + d.note + '</div>';
+    return;
+  }
+  $('est-out').innerHTML =
+    '<h3 style="margin:14px 0 6px">Size at each level: ' + d.name + '</h3>' +
+    '<table class="plan"><tr><th>Level</th><th>Type</th><th>Est. size</th><th>Saves vs F16</th></tr>' +
+    d.estimates.map(e => '<tr><td><b>' + e.level + '</b></td><td>' + e.quant_type + '</td><td>' +
+      (e.est_mb >= 1024 ? (e.est_mb / 1024).toFixed(1) + ' GB' : e.est_mb + ' MB') +
+      '</td><td>' + e.saved_pct_vs_f16 + '%</td></tr>').join('') + '</table>';
+}
 
 // upload
 $('up-btn').onclick = async () => {
@@ -421,6 +470,11 @@ async function loadHistory() {
     '(saved ' + h.saved_pct + '%) <a class="dl" href="/api/download/' + h.file_id + '">download</a></span></div>'
   ).join('') : '<div class="msg info">Nothing squeezed yet.</div>';
 }
+$('hist-clear').onclick = async () => {
+  if (!confirm('Clear all compression history?')) return;
+  await fetch('/api/history', {method: 'DELETE'});
+  loadHistory();
+};
 </script>
 </body>
 </html>

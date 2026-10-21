@@ -18,16 +18,18 @@ from pydantic import BaseModel
 
 try:
     # Package mode (uvicorn app.main:app, the Docker/Render entrypoint)
-    from app.quant import (QUANT_LEVELS, BITS_PER_PARAM, estimate_size_mb, fmt_mb,
-                           gguf_param_count, run_quantize, chromebook_plan,
-                           CHROMEBOOK_RAM_MB, find_quantize_bin)
+    from app.quant import (QUANT_LEVELS, QUANT_TYPE_TO_LEVEL, BITS_PER_PARAM,
+                           estimate_size_mb, fmt_mb, gguf_param_count,
+                           run_quantize, chromebook_plan, CHROMEBOOK_RAM_MB,
+                           find_quantize_bin, normalize_level, size_estimates_mb)
     from app.sources import (download_url, github_list_models, huggingface_list_models,
                              huggingface_download, safe_filename, parse_github_repo)
 except ImportError:
     # Script mode (uvicorn main:app from inside app/)
-    from quant import (QUANT_LEVELS, BITS_PER_PARAM, estimate_size_mb, fmt_mb,
-                       gguf_param_count, run_quantize, chromebook_plan,
-                       CHROMEBOOK_RAM_MB, find_quantize_bin)
+    from quant import (QUANT_LEVELS, QUANT_TYPE_TO_LEVEL, BITS_PER_PARAM,
+                       estimate_size_mb, fmt_mb, gguf_param_count,
+                       run_quantize, chromebook_plan, CHROMEBOOK_RAM_MB,
+                       find_quantize_bin, normalize_level, size_estimates_mb)
     from sources import (download_url, github_list_models, huggingface_list_models,
                          huggingface_download, safe_filename, parse_github_repo)
 
@@ -230,8 +232,11 @@ class CompressReq(BaseModel):
 
 def _do_compress(jid, model_id, level):
     try:
-        if level not in QUANT_LEVELS:
-            raise ValueError("unknown level")
+        level = normalize_level(level)
+        if not level:
+            raise ValueError(
+                "unknown level: pick one of %s (or a raw type like Q4_K_M)"
+                % ", ".join(QUANT_LEVELS))
         reg = registry()
         m = reg.get(model_id)
         if not m:
@@ -318,6 +323,90 @@ def api_levels():
          "bits": BITS_PER_PARAM[v]} for k, v in QUANT_LEVELS.items()]}
 
 
+@app.get("/api/stats")
+def api_stats():
+    """Totals for the dashboard header: models, disk used, history, jobs."""
+    reg = registry()
+    total_mb = sum(m.get("size_mb", 0) or 0 for m in reg.values())
+    with job_lock:
+        active = sum(1 for j in jobs.values() if j.get("ok") is None)
+    return {
+        "models": len(reg),
+        "total_size_mb": round(total_mb, 1),
+        "history_entries": len(history()),
+        "quantize_available": bool(find_quantize_bin()),
+        "active_jobs": active,
+    }
+
+
+@app.get("/api/jobs")
+def api_jobs(limit: int = 20):
+    """Recent jobs, newest first. Long log tails are stripped here;
+    fetch /api/jobs/{jid} for a single job's full detail."""
+    limit = max(1, min(limit, 100))
+    with job_lock:
+        js = sorted(jobs.values(),
+                    key=lambda j: j.get("created", ""), reverse=True)[:limit]
+        out = []
+        for j in js:
+            j2 = dict(j)
+            j2.pop("log_tail", None)
+            out.append(j2)
+    return {"jobs": out}
+
+
+@app.get("/api/models/{mid}/estimates")
+def api_model_estimates(mid: str):
+    """Per-level size estimates for one model (needs known param count)."""
+    reg = registry()
+    m = reg.get(mid)
+    if not m:
+        raise HTTPException(404, "model not found")
+    params = m.get("params")
+    estimates = size_estimates_mb(params) if params else []
+    return {
+        "model_id": mid,
+        "name": m["name"],
+        "size_mb": m.get("size_mb"),
+        "params_b": m.get("params_b"),
+        "estimates": estimates,
+        "note": (None if params else
+                 "Param count unknown (not a GGUF with readable metadata); "
+                 "per-level estimates need it."),
+    }
+
+
+@app.delete("/api/models/{mid}")
+def api_model_delete(mid: str):
+    """Delete a model and its file. Refuses when other registry entries
+    were derived from it (compressed outputs, adapters) so chains of
+    "compress again" runs never lose their source silently."""
+    reg = registry()
+    m = reg.get(mid)
+    if not m:
+        raise HTTPException(404, "model not found")
+    children = [c["id"] for c in reg.values()
+                if c.get("origin_id") == mid or c.get("from") == mid]
+    if children:
+        raise HTTPException(
+            409, "Model is the source for %d other %s; delete those first."
+            % (len(children), "entry" if len(children) == 1 else "entries"))
+    try:
+        if m.get("path") and os.path.isfile(m["path"]):
+            os.remove(m["path"])
+    except OSError:
+        pass
+    del reg[mid]
+    save_registry(reg)
+    return {"ok": True, "deleted": mid}
+
+
+@app.delete("/api/history")
+def api_history_clear():
+    _save_json(HIST_PATH, [])
+    return {"ok": True}
+
+
 # ---------------- chromebook mode ----------------
 
 @app.get("/api/chromebook/plan")
@@ -355,9 +444,25 @@ async def api_train(model_id: str = Form(...),
     if not m:
         raise HTTPException(404, "model not found")
     mp = m["path"]
+    if method not in ("lora", "lora-lowmem"):
+        raise HTTPException(422, "method must be lora or lora-lowmem")
+    if not (1 <= epochs <= 20):
+        raise HTTPException(422, "epochs must be 1..20")
+    if not (0 < lr <= 1):
+        raise HTTPException(422, "lr must be positive and at most 1")
+    if not (1 <= batch_size <= 8):
+        raise HTTPException(422, "batch_size must be 1..8")
+    if not (1 <= grad_accum <= 64):
+        raise HTTPException(422, "grad_accum must be 1..64")
+    if not (16 <= max_seq_len <= 4096):
+        raise HTTPException(422, "max_seq_len must be 16..4096")
     jid = new_job("train")
     # Read now: request files close after we return.
     data_bytes = await data.read()
+    if len(data_bytes) == 0:
+        raise HTTPException(422, "training data file is empty")
+    if len(data_bytes) > 200 * 1024 * 1024:
+        raise HTTPException(413, "training data over 200 MB is not accepted")
     data_name = safe_filename(data.filename or "data.txt")
     data_path = os.path.join(TRAIN_DIR, "%s_%s" % (jid, data_name))
     with open(data_path, "wb") as f:
