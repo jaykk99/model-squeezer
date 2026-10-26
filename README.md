@@ -2,7 +2,7 @@
 
 ## Live URL
 
-https://model-squeezer.onrender.com
+Currently suspended on Render (no live host yet).
 
 Compress any AI model as many times as you want. Less RAM, same model. Shows the size before and after every squeeze.
 
