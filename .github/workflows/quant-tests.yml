@@ -26,4 +26,4 @@ jobs:
       - name: Install lightweight test runner
         run: python -m pip install pytest
       - name: Test pure quantization and source helpers
-        run: python -m pytest -q tests/test_quant.py tests/test_sources.py
+        run: python -m pytest -q tests/test_quant.py tests/test_sources.py tests/test_netguard.py
