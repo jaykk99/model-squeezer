@@ -50,7 +50,7 @@ disk, so files disappear on redeploy (Render free tier).
 - `GET /api/history/export?fmt=csv` — download history as CSV (default JSON)
 - Compression accepts the level in any case (`q4`, `Q4`) or the raw llama.cpp type (`Q4_K_M`)
 - `/api/train` validates its inputs server-side (epochs 1-20, lr (0,1], batch 1-8, grad_accum 1-64, seq len 16-4096, training data non-empty and under 200 MB)
-- `download_url` only allows http(s) URLs — `file://`, `ftp://`, etc. are rejected so a crafted URL can never make the server touch local files
+- Direct model downloads reject non-http(s) schemes, URL-embedded credentials, loopback/private/reserved destination IPs and redirects to those addresses. Downloads are capped at 10 GiB by default; set `SQ_MAX_DOWNLOAD_BYTES` to override the byte ceiling. Incomplete downloads are deleted after errors. This check is defense-in-depth; deploy with network-level egress restrictions to address DNS rebinding and infrastructure metadata risks.
 
 ## Tests
 

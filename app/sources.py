@@ -16,38 +16,17 @@ def is_model_file(name):
     return name.lower().endswith(MODEL_EXTS)
 
 
-def _progress_reader(resp, total, dest_path, on_progress):
-    downloaded = 0
-    chunk = 1024 * 256
-    with open(dest_path, "wb") as f:
-        while True:
-            data = resp.read(chunk)
-            if not data:
-                break
-            f.write(data)
-            downloaded += len(data)
-            if on_progress and total:
-                on_progress(min(100, downloaded * 100.0 / total))
-    if on_progress:
-        on_progress(100)
-    return dest_path
-
-
 def download_url(url, dest_path, on_progress=None):
-    """Stream-download any direct URL to disk.
+    """Download public model files with bounded disk usage.
 
-    Only http(s) URLs are allowed: anything else (file://, ftp://, ...)
-    raises ValueError so a crafted URL can never make the server read or
-    write local files.
+    Local/reserved destinations and redirects are rejected. For additional
+    SSRF protection, deploy behind egress rules blocking private networks.
     """
-    scheme = urllib.parse.urlparse(url).scheme.lower()
-    if scheme not in ("http", "https"):
-        raise ValueError("Only http(s) URLs are allowed, got: %s" % (scheme or "(none)"))
-    req = urllib.request.Request(url, headers={"User-Agent": "model-squeezer/1.0"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        total = resp.headers.get("Content-Length")
-        total = int(total) if total else 0
-        return _progress_reader(resp, total, dest_path, on_progress)
+    try:
+        from .netguard import download_public
+    except ImportError:  # script mode (run from app/ directory)
+        from netguard import download_public
+    return download_public(url, dest_path, on_progress=on_progress)
 
 
 def parse_github_repo(url):
